@@ -9,6 +9,7 @@ import numpy as np
 class DetectionThread(QThread):
     frame_ready = pyqtSignal(np.ndarray, int, float)
     error_occurred = pyqtSignal(str)
+    model_switched = pyqtSignal(str)
     
     def __init__(self, camera_id=0, model_name='yolov8n.pt'):
         super().__init__()
@@ -18,6 +19,7 @@ class DetectionThread(QThread):
         self.detector = None
         self.camera = None
         self.conf_threshold = 0.5
+        self.pending_model = None
     
     def run(self):
         try:
@@ -34,6 +36,12 @@ class DetectionThread(QThread):
             fps = 0.0
             
             while self.running:
+                if self.pending_model:
+                    if self.detector.switch_model(self.pending_model):
+                        self.model_name = self.pending_model
+                        self.model_switched.emit(self.pending_model)
+                    self.pending_model = None
+                
                 frame = self.camera.read_frame()
                 
                 if frame is None:
@@ -42,11 +50,11 @@ class DetectionThread(QThread):
                 
                 start_time = time.time()
                 
-                boxes, confidences, person_count = self.detector.detect(
+                boxes, confidences, class_ids, person_count = self.detector.detect(
                     frame, self.conf_threshold
                 )
                 
-                frame_with_boxes = self.detector.draw_boxes(frame, boxes, confidences)
+                frame_with_boxes = self.detector.draw_boxes(frame, boxes, confidences, class_ids)
                 
                 fps_counter += 1
                 if time.time() - fps_timer >= 1.0:
@@ -72,3 +80,6 @@ class DetectionThread(QThread):
     
     def set_confidence_threshold(self, threshold):
         self.conf_threshold = threshold
+    
+    def switch_model(self, model_name):
+        self.pending_model = model_name

@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QPushButton, QGroupBox, QApplication, QFrame)
+                             QLabel, QPushButton, QGroupBox, QApplication, QFrame, QComboBox)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QImage, QPixmap, QFont
 import sys
@@ -11,12 +11,26 @@ from utils.thread import DetectionThread
 
 
 class MainWindow(QMainWindow):
+    MODELS_DIR = 'models'
+    
     def __init__(self):
         super().__init__()
         self.detection_thread = None
         self.current_frame = None
         self.detection_active = False
+        self.available_models = self._scan_models()
+        self.current_model = self.available_models[0] if self.available_models else None
         self.init_ui()
+    
+    def _scan_models(self):
+        models = []
+        if os.path.exists(self.MODELS_DIR):
+            for f in os.listdir(self.MODELS_DIR):
+                if f.endswith(('.pt', '.pth', '.onnx', '.engine')):
+                    models.append(os.path.join(self.MODELS_DIR, f))
+        if not models:
+            models = ['models/yolov8n.pt']
+        return sorted(models)
     
     def init_ui(self):
         self.setWindowTitle('YOLO实时人员检测系统')
@@ -84,6 +98,89 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.model_label)
         
         control_layout.addWidget(stats_group)
+        
+        model_group = QGroupBox("模型选择")
+        model_layout = QVBoxLayout(model_group)
+        
+        self.model_combo = QComboBox()
+        self.model_combo.addItems(self.available_models)
+        if self.current_model:
+            self.model_combo.setCurrentText(self.current_model)
+        self.model_combo.setMinimumHeight(35)
+        self.model_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #3a3a3a;
+                color: white;
+                border: 1px solid #555;
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 13px;
+            }
+            QComboBox:hover {
+                border: 1px solid #0078d4;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 8px solid white;
+                margin-right: 10px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #3a3a3a;
+                color: white;
+                selection-background-color: #0078d4;
+                border: 1px solid #555;
+            }
+        """)
+        model_layout.addWidget(self.model_combo)
+        
+        btn_row = QHBoxLayout()
+        self.switch_model_btn = QPushButton("切换模型")
+        self.switch_model_btn.setMinimumHeight(40)
+        self.switch_model_btn.clicked.connect(self.switch_model)
+        self.switch_model_btn.setEnabled(False)
+        self.switch_model_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9c27b0;
+                color: white;
+                border-radius: 5px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #7b1fa2;
+            }
+            QPushButton:disabled {
+                background-color: #666;
+            }
+        """)
+        btn_row.addWidget(self.switch_model_btn)
+        
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setMinimumHeight(40)
+        self.refresh_btn.clicked.connect(self.refresh_models)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #607d8b;
+                color: white;
+                border-radius: 5px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #546e7a;
+            }
+        """)
+        btn_row.addWidget(self.refresh_btn)
+        
+        model_layout.addLayout(btn_row)
+        
+        control_layout.addWidget(model_group)
         
         control_group = QGroupBox("控制面板")
         control_group_layout = QVBoxLayout(control_group)
@@ -179,9 +276,11 @@ class MainWindow(QMainWindow):
         if self.detection_active:
             return
         
-        self.detection_thread = DetectionThread(camera_id=0, model_name='yolov8n.pt')
+        self.current_model = self.model_combo.currentText()
+        self.detection_thread = DetectionThread(camera_id=0, model_name=self.current_model)
         self.detection_thread.frame_ready.connect(self.update_frame)
         self.detection_thread.error_occurred.connect(self.handle_error)
+        self.detection_thread.model_switched.connect(self.on_model_switched)
         
         self.detection_active = True
         self.detection_thread.start()
@@ -189,6 +288,8 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.screenshot_btn.setEnabled(True)
+        self.switch_model_btn.setEnabled(True)
+        self.model_label.setText(f"模型: {os.path.basename(self.current_model).replace('.pt', '')}")
         self.statusBar().showMessage('检测中...')
     
     def stop_detection(self):
@@ -202,6 +303,7 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.screenshot_btn.setEnabled(False)
+        self.switch_model_btn.setEnabled(False)
         
         self.video_label.setText("检测已停止")
         self.person_count_label.setText("0")
@@ -243,6 +345,41 @@ class MainWindow(QMainWindow):
     def handle_error(self, error_msg):
         self.statusBar().showMessage(f'错误: {error_msg}')
         self.stop_detection()
+    
+    def switch_model(self):
+        if self.detection_thread and self.detection_active:
+            new_model = self.model_combo.currentText()
+            if new_model != self.current_model:
+                self.detection_thread.switch_model(new_model)
+                self.statusBar().showMessage(f'正在切换模型到 {new_model}...')
+            else:
+                self.statusBar().showMessage('已是当前模型')
+    
+    def on_model_switched(self, model_name):
+        self.current_model = model_name
+        self.model_label.setText(f"模型: {os.path.basename(model_name).replace('.pt', '')}")
+        self.statusBar().showMessage(f'已切换到模型: {model_name}')
+    
+    def refresh_models(self):
+        old_models = set(self.available_models)
+        self.available_models = self._scan_models()
+        new_models = set(self.available_models)
+        
+        added = new_models - old_models
+        removed = old_models - new_models
+        
+        self.model_combo.clear()
+        self.model_combo.addItems(self.available_models)
+        
+        if added:
+            self.statusBar().showMessage(f'发现新模型: {", ".join(added)}')
+        elif removed:
+            self.statusBar().showMessage(f'模型已移除: {", ".join(removed)}')
+        else:
+            self.statusBar().showMessage('模型列表已刷新')
+        
+        if self.current_model in self.available_models:
+            self.model_combo.setCurrentText(self.current_model)
     
     def save_screenshot(self):
         if self.current_frame is not None:
