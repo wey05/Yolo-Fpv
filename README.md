@@ -1,16 +1,19 @@
-# YOLO实时人员检测系统
+# YOLO实时目标检测系统
 
-基于YOLOv8和PyQt5的实时摄像头人员检测应用。
+基于YOLO和PyQt5的实时摄像头目标检测应用，支持多种YOLO模型动态切换。
 
 ## 功能特性
 
-- ✅ 实时摄像头人员检测
+- ✅ 实时摄像头目标检测（支持80+类别）
+- ✅ 多模型支持（YOLOv8n/v10n/YOLO26n/m/x）
+- ✅ 运行时动态切换模型
 - ✅ 现代化PyQt5界面
 - ✅ GPU/CPU自动切换
-- ✅ 实时显示人物数量
+- ✅ 实时显示检测物体数量
 - ✅ FPS监控
-- ✅ 检测框可视化（颜色区分置信度）
+- ✅ 检测框可视化（类别颜色区分）
 - ✅ 一键截图保存
+- ✅ Git LFS支持大模型文件管理
 
 ## 项目结构
 
@@ -18,13 +21,18 @@
 yolo/
 ├── main.py                 # 主程序入口
 ├── requirements.txt        # 依赖管理
+├── models/                 # 模型文件目录
+│   ├── yolov8n.pt         # YOLOv8 nano (6.3MB)
+│   ├── yolov10n.pt        # YOLOv10 nano (5.6MB)
+│   ├── yolo26n.pt         # YOLO26 nano (5.3MB)
+│   ├── yolo26m.pt         # YOLO26 medium (43MB)
+│   └── yolo26x.pt         # YOLO26 extra large (114MB)
 ├── ui/
 │   ├── __init__.py
 │   └── main_window.py     # PyQt5主窗口
 ├── core/
 │   ├── __init__.py
-│   ├── camera.py          # 摄像头管理
-│   └── detector.py        # YOLOv8检测器
+│   └── detector.py        # YOLO检测器
 └── utils/
     ├── __init__.py
     └── thread.py          # 工作线程
@@ -32,39 +40,63 @@ yolo/
 
 ## 安装步骤
 
-### 1. 安装依赖
+### 1. 克隆仓库
+
+```bash
+git clone https://github.com/wey05/Yolo-Fpv.git
+cd Yolo-Fpv
+```
+
+### 2. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 运行程序
+### 3. 安装Git LFS（用于下载模型）
+
+```bash
+git lfs install
+git lfs pull
+```
+
+### 4. 运行程序
 
 ```bash
 python main.py
 ```
 
-首次运行会自动下载YOLOv8n模型（约6MB）。
-
 ## 使用说明
 
-1. **开始检测**: 点击"开始检测"按钮启动摄像头
-2. **查看结果**: 实时视频显示检测到的人物（绿色框=高置信度，黄色框=中置信度）
-3. **保存截图**: 点击"保存截图"保存当前画面
-4. **停止检测**: 点击"停止检测"关闭摄像头
+1. **选择模型**: 在"模型选择"下拉框中选择要使用的YOLO模型
+2. **开始检测**: 点击"开始检测"按钮启动摄像头
+3. **查看结果**: 实时视频显示检测到的物体（不同类别用不同颜色标注）
+4. **切换模型**: 检测过程中可随时切换模型（点击"切换模型"按钮）
+5. **保存截图**: 点击"保存截图"保存当前画面
+6. **停止检测**: 点击"停止检测"关闭摄像头
+
+## 支持的模型
+
+| 模型 | 大小 | 速度 | 精度 | 适用场景 |
+|------|------|------|------|----------|
+| YOLOv8n | 6.3MB | 最快 | 较低 | 实时检测、低端设备 |
+| YOLOv10n | 5.6MB | 最快 | 较低 | 实时检测、资源受限 |
+| YOLO26n | 5.3MB | 最快 | 中等 | 平衡速度与精度 |
+| YOLO26m | 43MB | 中等 | 较高 | 精度优先场景 |
+| YOLO26x | 114MB | 较慢 | 最高 | 最高精度要求 |
 
 ## 性能参数
 
-- **模型**: YOLOv8n (nano版本)
-- **CPU模式**: 15-20 FPS
-- **GPU模式**: 30+ FPS
-- **检测精度**: Person类别 mAP>90%
+- **CPU模式**: 15-20 FPS（YOLOv8n）
+- **GPU模式**: 30-60 FPS（YOLOv8n，取决于GPU性能）
+- **检测类别**: 80+ 类别（COCO数据集）
+- **检测精度**: mAP@0.5 > 50%（YOLOv8n）
 
 ## 系统要求
 
 - Python 3.8+
 - 摄像头设备
-- (可选) NVIDIA GPU + CUDA
+- （可选）NVIDIA GPU + CUDA
 
 ## 故障排除
 
@@ -74,18 +106,42 @@ python main.py
 
 ### 检测速度慢
 - 确保已安装GPU版本的PyTorch
-- 或尝试更小的输入分辨率
+- 使用更小的模型（如YOLOv8n或YOLO26n）
 
-### 模型下载失败
-- 手动下载: https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
-- 放置在项目根目录
+### 模型文件缺失
+```bash
+# 确保已安装Git LFS
+git lfs install
+# 拉取模型文件
+git lfs pull
+```
+
+### GPU未被识别
+```bash
+# 检查CUDA是否可用
+python -c "import torch; print(torch.cuda.is_available())"
+# 安装GPU版本的PyTorch
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
 
 ## 技术栈
 
-- **YOLOv8**: 目标检测模型
+- **YOLO**: 目标检测模型（Ultralytics）
 - **PyQt5**: GUI框架
 - **OpenCV**: 图像处理
 - **PyTorch**: 深度学习框架
+- **Git LFS**: 大文件管理
+
+## 开发说明
+
+### 检测所有类别
+默认检测所有80+类别。如需仅检测人员，修改 `core/detector.py`:
+```python
+DETECT_ALL_CLASSES = False  # 改为False仅检测人员
+```
+
+### 添加新模型
+将新的 `.pt` 模型文件放入 `models/` 目录，点击界面上的"刷新"按钮即可识别。
 
 ## 许可证
 
