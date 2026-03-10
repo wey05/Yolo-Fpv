@@ -1,401 +1,494 @@
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QPushButton, QGroupBox, QApplication, QFrame, QComboBox)
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QImage, QPixmap, QFont
-import sys
+"""
+YOLO 实时目标检测系统 - 主窗口
+================================
+深色现代 UI，支持置信度调节、摄像头选择、分辨率切换。
+"""
+
+import logging
 import os
+from datetime import datetime
+from typing import Optional
+
 import cv2
 import numpy as np
-from datetime import datetime
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont, QImage, QPixmap
+from PyQt5.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.camera import RESOLUTION_PRESETS, CameraManager
+from ui.theme import (
+    BTN_EXIT,
+    BTN_REFRESH,
+    BTN_SCREENSHOT,
+    BTN_START,
+    BTN_STOP,
+    BTN_SWITCH,
+    INFO_LABEL_STYLE,
+    SECTION_TITLE_STYLE,
+    SLIDER_VALUE_STYLE,
+    VIDEO_LABEL_STYLE,
+    Colors,
+    person_count_style,
+)
 from utils.thread import DetectionThread
+
+logger = logging.getLogger(__name__)
+
+MODEL_EXTENSIONS = ('.pt', '.pth', '.onnx', '.engine')
 
 
 class MainWindow(QMainWindow):
-    MODELS_DIR = 'models'
-    
-    def __init__(self):
+    """YOLO 实时目标检测系统主窗口。"""
+
+    MODELS_DIR: str = 'models'
+
+    def __init__(self) -> None:
         super().__init__()
-        self.detection_thread = None
-        self.current_frame = None
-        self.detection_active = False
-        self.available_models = self._scan_models()
-        self.current_model = self.available_models[0] if self.available_models else None
-        self.init_ui()
-    
-    def _scan_models(self):
-        models = []
+        self.detection_thread: Optional[DetectionThread] = None
+        self.current_frame: Optional[np.ndarray] = None
+        self.detection_active: bool = False
+        self.available_models: list[str] = self._scan_models()
+        self.current_model: Optional[str] = (
+            self.available_models[0] if self.available_models else None
+        )
+        self._init_ui()
+
+    # ══════════════════════════════════════════════
+    #  模型扫描
+    # ══════════════════════════════════════════════
+
+    def _scan_models(self) -> list[str]:
+        """扫描 models/ 目录下的所有可用模型文件。"""
+        models: list[str] = []
         if os.path.exists(self.MODELS_DIR):
             for f in os.listdir(self.MODELS_DIR):
-                if f.endswith(('.pt', '.pth', '.onnx', '.engine')):
-                    models.append(os.path.join(self.MODELS_DIR, f))
+                if f.endswith(MODEL_EXTENSIONS):
+                    full_path = os.path.join(self.MODELS_DIR, f)
+                    models.append(full_path)
         if not models:
-            models = ['models/yolov8n.pt']
+            default = os.path.join(self.MODELS_DIR, 'yolov8n.pt')
+            if os.path.exists(default):
+                models.append(default)
+            else:
+                logger.warning("未找到任何模型文件")
         return sorted(models)
-    
-    def init_ui(self):
-        self.setWindowTitle('YOLO实时人员检测系统')
-        self.setGeometry(100, 100, 1200, 700)
-        self.setMinimumSize(800, 600)
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        main_layout = QHBoxLayout(central_widget)
-        
-        video_group = QGroupBox("实时视频")
-        video_layout = QVBoxLayout(video_group)
-        
-        self.video_label = QLabel()
+
+    # ══════════════════════════════════════════════
+    #  UI 初始化
+    # ══════════════════════════════════════════════
+
+    def _init_ui(self) -> None:
+        self.setWindowTitle('YOLO 实时目标检测系统')
+        self.setGeometry(100, 100, 1280, 760)
+        self.setMinimumSize(900, 640)
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QHBoxLayout(central)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
+
+        # ── 左侧：视频区域 ───────────────────────
+        root.addWidget(self._build_video_panel(), stretch=3)
+
+        # ── 右侧：控制面板 ───────────────────────
+        right = QVBoxLayout()
+        right.setSpacing(10)
+        right.addWidget(self._build_stats_card())
+        right.addWidget(self._build_settings_card())
+        right.addWidget(self._build_control_card())
+        right.addStretch()
+
+        right_container = QWidget()
+        right_container.setLayout(right)
+        root.addWidget(right_container, stretch=1)
+
+        self.statusBar().showMessage('就绪 - 点击「开始检测」启动')
+
+    # ── 视频面板 ──────────────────────────────
+
+    def _build_video_panel(self) -> QGroupBox:
+        group = QGroupBox("实时视频")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(8, 16, 8, 8)
+
+        self.video_label = QLabel("等待启动摄像头...")
         self.video_label.setMinimumSize(640, 480)
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setStyleSheet("""
-            QLabel {
-                background-color: #2b2b2b;
-                border: 2px solid #555;
-                border-radius: 5px;
-                color: #888;
-                font-size: 16px;
-            }
-        """)
-        self.video_label.setText("等待启动摄像头...")
-        video_layout.addWidget(self.video_label)
-        
-        main_layout.addWidget(video_group, stretch=3)
-        
-        control_panel = QWidget()
-        control_layout = QVBoxLayout(control_panel)
-        
-        stats_group = QGroupBox("检测统计")
-        stats_layout = QVBoxLayout(stats_group)
-        
-        person_count_label_title = QLabel("检测到的人物数量")
-        person_count_label_title.setAlignment(Qt.AlignCenter)
-        person_count_label_title.setFont(QFont('Arial', 12, QFont.Bold))
-        stats_layout.addWidget(person_count_label_title)
-        
+        self.video_label.setStyleSheet(VIDEO_LABEL_STYLE)
+        self.video_label.setFont(QFont('Microsoft YaHei', 14))
+        layout.addWidget(self.video_label)
+
+        return group
+
+    # ── 检测统计卡片 ─────────────────────────
+
+    def _build_stats_card(self) -> QGroupBox:
+        group = QGroupBox("检测统计")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(12, 20, 12, 12)
+        layout.setSpacing(6)
+
+        # 标题
+        title = QLabel("检测到的人物数量")
+        title.setAlignment(Qt.AlignCenter)
+        title.setFont(QFont('Microsoft YaHei', 11, QFont.Bold))
+        layout.addWidget(title)
+
+        # 人数大数字
         self.person_count_label = QLabel("0")
         self.person_count_label.setAlignment(Qt.AlignCenter)
-        self.person_count_label.setFont(QFont('Arial', 48, QFont.Bold))
-        self.person_count_label.setStyleSheet("""
-            QLabel {
-                color: #00ff00;
-                background-color: #1a1a1a;
-                border: 3px solid #00ff00;
-                border-radius: 10px;
-                padding: 20px;
-            }
-        """)
-        stats_layout.addWidget(self.person_count_label)
-        
+        self.person_count_label.setFont(QFont('Consolas', 52, QFont.Bold))
+        self.person_count_label.setStyleSheet(
+            person_count_style(Colors.STATUS_SAFE)
+        )
+        self.person_count_label.setMinimumHeight(100)
+        layout.addWidget(self.person_count_label)
+
+        # FPS
         self.fps_label = QLabel("FPS: 0.0")
         self.fps_label.setAlignment(Qt.AlignCenter)
-        self.fps_label.setFont(QFont('Arial', 10))
-        stats_layout.addWidget(self.fps_label)
-        
-        self.model_label = QLabel("模型: YOLOv8n")
-        self.model_label.setAlignment(Qt.AlignCenter)
-        self.model_label.setFont(QFont('Arial', 9))
-        stats_layout.addWidget(self.model_label)
-        
-        control_layout.addWidget(stats_group)
-        
-        model_group = QGroupBox("模型选择")
-        model_layout = QVBoxLayout(model_group)
-        
+        self.fps_label.setStyleSheet(INFO_LABEL_STYLE)
+        self.fps_label.setFont(QFont('Consolas', 11))
+        layout.addWidget(self.fps_label)
+
+        # 当前模型
+        self.model_info_label = QLabel("模型: --")
+        self.model_info_label.setAlignment(Qt.AlignCenter)
+        self.model_info_label.setStyleSheet(INFO_LABEL_STYLE)
+        self.model_info_label.setFont(QFont('Microsoft YaHei', 10))
+        layout.addWidget(self.model_info_label)
+
+        return group
+
+    # ── 设置卡片（模型 + 置信度 + 摄像头 + 分辨率）─────
+
+    def _build_settings_card(self) -> QGroupBox:
+        group = QGroupBox("检测设置")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(12, 20, 12, 12)
+        layout.setSpacing(6)
+
+        # ─ 模型选择 ─
+        layout.addWidget(self._make_section_title("模型选择"))
+
         self.model_combo = QComboBox()
         self.model_combo.addItems(self.available_models)
         if self.current_model:
             self.model_combo.setCurrentText(self.current_model)
-        self.model_combo.setMinimumHeight(35)
-        self.model_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #3a3a3a;
-                color: white;
-                border: 1px solid #555;
-                border-radius: 5px;
-                padding: 5px;
-                font-size: 13px;
-            }
-            QComboBox:hover {
-                border: 1px solid #0078d4;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 30px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 8px solid white;
-                margin-right: 10px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #3a3a3a;
-                color: white;
-                selection-background-color: #0078d4;
-                border: 1px solid #555;
-            }
-        """)
-        model_layout.addWidget(self.model_combo)
-        
+        layout.addWidget(self.model_combo)
+
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
         self.switch_model_btn = QPushButton("切换模型")
-        self.switch_model_btn.setMinimumHeight(40)
-        self.switch_model_btn.clicked.connect(self.switch_model)
+        self.switch_model_btn.setMinimumHeight(36)
+        self.switch_model_btn.setStyleSheet(BTN_SWITCH)
         self.switch_model_btn.setEnabled(False)
-        self.switch_model_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9c27b0;
-                color: white;
-                border-radius: 5px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #7b1fa2;
-            }
-            QPushButton:disabled {
-                background-color: #666;
-            }
-        """)
+        self.switch_model_btn.clicked.connect(self._on_switch_model)
+        self.switch_model_btn.setToolTip("在检测运行时切换到选定的模型")
         btn_row.addWidget(self.switch_model_btn)
-        
+
         self.refresh_btn = QPushButton("刷新")
-        self.refresh_btn.setMinimumHeight(40)
-        self.refresh_btn.clicked.connect(self.refresh_models)
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #607d8b;
-                color: white;
-                border-radius: 5px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #546e7a;
-            }
-        """)
+        self.refresh_btn.setMinimumHeight(36)
+        self.refresh_btn.setStyleSheet(BTN_REFRESH)
+        self.refresh_btn.clicked.connect(self._on_refresh_models)
+        self.refresh_btn.setToolTip("重新扫描 models/ 目录")
         btn_row.addWidget(self.refresh_btn)
-        
-        model_layout.addLayout(btn_row)
-        
-        control_layout.addWidget(model_group)
-        
-        control_group = QGroupBox("控制面板")
-        control_group_layout = QVBoxLayout(control_group)
-        
+
+        layout.addLayout(btn_row)
+
+        # ─ 置信度阈值 ─
+        layout.addWidget(self._make_section_title("置信度阈值"))
+
+        conf_row = QHBoxLayout()
+        conf_row.setSpacing(8)
+
+        self.conf_slider = QSlider(Qt.Horizontal)
+        self.conf_slider.setRange(5, 95)
+        self.conf_slider.setValue(50)
+        self.conf_slider.setTickInterval(5)
+        self.conf_slider.valueChanged.connect(self._on_conf_changed)
+        self.conf_slider.setToolTip("调节检测置信度阈值（0.05 ~ 0.95）")
+        conf_row.addWidget(self.conf_slider)
+
+        self.conf_value_label = QLabel("0.50")
+        self.conf_value_label.setStyleSheet(SLIDER_VALUE_STYLE)
+        self.conf_value_label.setAlignment(Qt.AlignCenter)
+        self.conf_value_label.setFont(QFont('Consolas', 12, QFont.Bold))
+        conf_row.addWidget(self.conf_value_label)
+
+        layout.addLayout(conf_row)
+
+        # ─ 摄像头选择 ─
+        layout.addWidget(self._make_section_title("摄像头"))
+
+        cam_row = QHBoxLayout()
+        cam_row.setSpacing(8)
+
+        self.camera_combo = QComboBox()
+        self._populate_cameras()
+        cam_row.addWidget(self.camera_combo, stretch=1)
+
+        self.cam_refresh_btn = QPushButton("扫描")
+        self.cam_refresh_btn.setMinimumHeight(30)
+        self.cam_refresh_btn.setMaximumWidth(60)
+        self.cam_refresh_btn.setStyleSheet(BTN_REFRESH)
+        self.cam_refresh_btn.clicked.connect(self._on_refresh_cameras)
+        self.cam_refresh_btn.setToolTip("重新扫描可用摄像头")
+        cam_row.addWidget(self.cam_refresh_btn)
+
+        layout.addLayout(cam_row)
+
+        # ─ 分辨率选择 ─
+        layout.addWidget(self._make_section_title("分辨率"))
+
+        self.resolution_combo = QComboBox()
+        for key in RESOLUTION_PRESETS:
+            self.resolution_combo.addItem(key)
+        self.resolution_combo.setCurrentText("640x480")
+        self.resolution_combo.setToolTip("切换摄像头采集分辨率（需重启检测生效）")
+        layout.addWidget(self.resolution_combo)
+
+        return group
+
+    # ── 控制按钮卡片 ─────────────────────────
+
+    def _build_control_card(self) -> QGroupBox:
+        group = QGroupBox("控制面板")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(12, 20, 12, 12)
+        layout.setSpacing(8)
+
         self.start_btn = QPushButton("开始检测")
-        self.start_btn.setMinimumHeight(40)
-        self.start_btn.clicked.connect(self.start_detection)
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border-radius: 5px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-        """)
-        control_group_layout.addWidget(self.start_btn)
-        
+        self.start_btn.setMinimumHeight(42)
+        self.start_btn.setStyleSheet(BTN_START)
+        self.start_btn.clicked.connect(self._on_start)
+        self.start_btn.setToolTip("启动摄像头并开始实时检测")
+        layout.addWidget(self.start_btn)
+
         self.stop_btn = QPushButton("停止检测")
-        self.stop_btn.setMinimumHeight(40)
-        self.stop_btn.clicked.connect(self.stop_detection)
+        self.stop_btn.setMinimumHeight(42)
+        self.stop_btn.setStyleSheet(BTN_STOP)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                border-radius: 5px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-            QPushButton:disabled {
-                background-color: #666;
-            }
-        """)
-        control_group_layout.addWidget(self.stop_btn)
-        
+        self.stop_btn.clicked.connect(self._on_stop)
+        self.stop_btn.setToolTip("停止检测并释放摄像头")
+        layout.addWidget(self.stop_btn)
+
         self.screenshot_btn = QPushButton("保存截图")
-        self.screenshot_btn.setMinimumHeight(40)
-        self.screenshot_btn.clicked.connect(self.save_screenshot)
+        self.screenshot_btn.setMinimumHeight(42)
+        self.screenshot_btn.setStyleSheet(BTN_SCREENSHOT)
         self.screenshot_btn.setEnabled(False)
-        self.screenshot_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border-radius: 5px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0b7dda;
-            }
-            QPushButton:disabled {
-                background-color: #666;
-            }
-        """)
-        control_group_layout.addWidget(self.screenshot_btn)
-        
+        self.screenshot_btn.clicked.connect(self._on_screenshot)
+        self.screenshot_btn.setToolTip("将当前检测画面保存为图片")
+        layout.addWidget(self.screenshot_btn)
+
         self.exit_btn = QPushButton("退出程序")
-        self.exit_btn.setMinimumHeight(40)
+        self.exit_btn.setMinimumHeight(42)
+        self.exit_btn.setStyleSheet(BTN_EXIT)
         self.exit_btn.clicked.connect(self.close)
-        self.exit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ff9800;
-                color: white;
-                border-radius: 5px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #e68900;
-            }
-        """)
-        control_group_layout.addWidget(self.exit_btn)
-        
-        control_layout.addWidget(control_group)
-        
-        control_layout.addStretch()
-        
-        main_layout.addWidget(control_panel, stretch=1)
-        
-        self.statusBar().showMessage('就绪 - 点击"开始检测"启动')
-    
-    def start_detection(self):
+        layout.addWidget(self.exit_btn)
+
+        return group
+
+    # ── 辅助方法 ──────────────────────────────
+
+    @staticmethod
+    def _make_section_title(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setStyleSheet(SECTION_TITLE_STYLE)
+        label.setFont(QFont('Microsoft YaHei', 10, QFont.Bold))
+        return label
+
+    def _populate_cameras(self) -> None:
+        """枚举可用摄像头并填充下拉框。"""
+        self.camera_combo.clear()
+        cameras = CameraManager.enumerate_cameras(max_test=5)
+        if cameras:
+            for cam_id in cameras:
+                self.camera_combo.addItem(f"摄像头 {cam_id}", cam_id)
+        else:
+            self.camera_combo.addItem("摄像头 0", 0)
+
+    def _set_detection_ui_state(self, active: bool) -> None:
+        """统一切换检测启停时的控件状态。"""
+        self.start_btn.setEnabled(not active)
+        self.stop_btn.setEnabled(active)
+        self.screenshot_btn.setEnabled(active)
+        self.switch_model_btn.setEnabled(active)
+        # 检测中禁止切换摄像头和分辨率
+        self.camera_combo.setEnabled(not active)
+        self.resolution_combo.setEnabled(not active)
+        self.cam_refresh_btn.setEnabled(not active)
+
+    # ══════════════════════════════════════════════
+    #  事件处理
+    # ══════════════════════════════════════════════
+
+    def _on_start(self) -> None:
+        """开始检测。"""
         if self.detection_active:
             return
-        
+
         self.current_model = self.model_combo.currentText()
-        self.detection_thread = DetectionThread(camera_id=0, model_name=self.current_model)
-        self.detection_thread.frame_ready.connect(self.update_frame)
-        self.detection_thread.error_occurred.connect(self.handle_error)
-        self.detection_thread.model_switched.connect(self.on_model_switched)
-        
+        camera_id: int = self.camera_combo.currentData() or 0
+        resolution: str = self.resolution_combo.currentText()
+        conf = self.conf_slider.value() / 100.0
+
+        self.detection_thread = DetectionThread(
+            camera_id=camera_id,
+            model_name=self.current_model,
+            resolution=resolution,
+        )
+        self.detection_thread.set_confidence_threshold(conf)
+        self.detection_thread.frame_ready.connect(self._on_frame_ready)
+        self.detection_thread.error_occurred.connect(self._on_error)
+        self.detection_thread.model_switched.connect(self._on_model_switched)
+
         self.detection_active = True
         self.detection_thread.start()
-        
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
-        self.screenshot_btn.setEnabled(True)
-        self.switch_model_btn.setEnabled(True)
-        self.model_label.setText(f"模型: {os.path.basename(self.current_model).replace('.pt', '')}")
+
+        self._set_detection_ui_state(True)
+        model_display = os.path.basename(self.current_model).rsplit('.', 1)[0]
+        self.model_info_label.setText(f"模型: {model_display}")
         self.statusBar().showMessage('检测中...')
-    
-    def stop_detection(self):
+        logger.info("检测已启动 -- 模型: %s, 摄像头: %d, 分辨率: %s",
+                     self.current_model, camera_id, resolution)
+
+    def _on_stop(self) -> None:
+        """停止检测。"""
         if self.detection_thread and self.detection_active:
             self.detection_thread.stop()
             self.detection_thread = None
-        
+
         self.detection_active = False
         self.current_frame = None
-        
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.screenshot_btn.setEnabled(False)
-        self.switch_model_btn.setEnabled(False)
-        
+
+        self._set_detection_ui_state(False)
+        self.video_label.clear()
         self.video_label.setText("检测已停止")
         self.person_count_label.setText("0")
+        self.person_count_label.setStyleSheet(
+            person_count_style(Colors.STATUS_SAFE)
+        )
         self.fps_label.setText("FPS: 0.0")
         self.statusBar().showMessage('已停止')
-    
-    def update_frame(self, frame, person_count, fps):
+        logger.info("检测已停止")
+
+    def _on_frame_ready(self, frame: np.ndarray, person_count: int, fps: float) -> None:
+        """接收新帧并更新 UI。"""
         self.current_frame = frame.copy()
-        
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = rgb_frame.shape
-        bytes_per_line = ch * w
-        qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        
-        scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
-            self.video_label.size(), 
-            Qt.KeepAspectRatio, 
-            Qt.SmoothTransformation
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        qt_img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+
+        scaled = QPixmap.fromImage(qt_img).scaled(
+            self.video_label.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
         )
-        
-        self.video_label.setPixmap(scaled_pixmap)
-        
+        self.video_label.setPixmap(scaled)
+
+        # 更新人数
         self.person_count_label.setText(str(person_count))
+        color = Colors.STATUS_SAFE if person_count == 0 else Colors.STATUS_WARN
+        self.person_count_label.setStyleSheet(person_count_style(color))
+
+        # 更新 FPS
         self.fps_label.setText(f"FPS: {fps:.1f}")
-        
-        color = "#00ff00" if person_count == 0 else "#ffff00"
-        self.person_count_label.setStyleSheet(f"""
-            QLabel {{
-                color: {color};
-                background-color: #1a1a1a;
-                border: 3px solid {color};
-                border-radius: 10px;
-                padding: 20px;
-                font-size: 48px;
-                font-weight: bold;
-            }}
-        """)
-    
-    def handle_error(self, error_msg):
-        self.statusBar().showMessage(f'错误: {error_msg}')
-        self.stop_detection()
-    
-    def switch_model(self):
-        if self.detection_thread and self.detection_active:
-            new_model = self.model_combo.currentText()
-            if new_model != self.current_model:
-                self.detection_thread.switch_model(new_model)
-                self.statusBar().showMessage(f'正在切换模型到 {new_model}...')
-            else:
-                self.statusBar().showMessage('已是当前模型')
-    
-    def on_model_switched(self, model_name):
+
+    def _on_error(self, msg: str) -> None:
+        """处理检测线程错误。"""
+        logger.error("检测错误: %s", msg)
+        self.statusBar().showMessage(f'错误: {msg}')
+        self._on_stop()
+
+    def _on_switch_model(self) -> None:
+        """切换模型。"""
+        if not (self.detection_thread and self.detection_active):
+            return
+        new_model = self.model_combo.currentText()
+        if new_model != self.current_model:
+            self.detection_thread.switch_model(new_model)
+            self.statusBar().showMessage(f'正在切换模型到 {os.path.basename(new_model)}...')
+        else:
+            self.statusBar().showMessage('已是当前模型')
+
+    def _on_model_switched(self, model_name: str) -> None:
+        """模型切换完成回调。"""
         self.current_model = model_name
-        self.model_label.setText(f"模型: {os.path.basename(model_name).replace('.pt', '')}")
-        self.statusBar().showMessage(f'已切换到模型: {model_name}')
-    
-    def refresh_models(self):
-        old_models = set(self.available_models)
+        display = os.path.basename(model_name).rsplit('.', 1)[0]
+        self.model_info_label.setText(f"模型: {display}")
+        self.statusBar().showMessage(f'已切换到模型: {display}')
+        logger.info("模型已切换: %s", model_name)
+
+    def _on_refresh_models(self) -> None:
+        """刷新模型列表。"""
+        old = set(self.available_models)
         self.available_models = self._scan_models()
-        new_models = set(self.available_models)
-        
-        added = new_models - old_models
-        removed = old_models - new_models
-        
+        new = set(self.available_models)
+
         self.model_combo.clear()
         self.model_combo.addItems(self.available_models)
-        
+
+        added = new - old
+        removed = old - new
         if added:
-            self.statusBar().showMessage(f'发现新模型: {", ".join(added)}')
+            self.statusBar().showMessage(f'发现新模型: {", ".join(os.path.basename(m) for m in added)}')
         elif removed:
-            self.statusBar().showMessage(f'模型已移除: {", ".join(removed)}')
+            self.statusBar().showMessage(f'模型已移除: {", ".join(os.path.basename(m) for m in removed)}')
         else:
             self.statusBar().showMessage('模型列表已刷新')
-        
+
         if self.current_model in self.available_models:
             self.model_combo.setCurrentText(self.current_model)
-    
-    def save_screenshot(self):
-        if self.current_frame is not None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"screenshot_{timestamp}.jpg"
-            
-            if not os.path.exists('screenshots'):
-                os.makedirs('screenshots')
-            
-            filepath = os.path.join('screenshots', filename)
-            cv2.imwrite(filepath, self.current_frame)
-            self.statusBar().showMessage(f'截图已保存: {filepath}')
-        else:
+
+    def _on_refresh_cameras(self) -> None:
+        """刷新摄像头列表。"""
+        self._populate_cameras()
+        self.statusBar().showMessage('摄像头列表已刷新')
+
+    def _on_conf_changed(self, value: int) -> None:
+        """置信度滑块值变化。"""
+        threshold = value / 100.0
+        self.conf_value_label.setText(f"{threshold:.2f}")
+        if self.detection_thread and self.detection_active:
+            self.detection_thread.set_confidence_threshold(threshold)
+
+    def _on_screenshot(self) -> None:
+        """保存当前帧截图。"""
+        if self.current_frame is None:
             self.statusBar().showMessage('无可用截图')
-    
-    def closeEvent(self, event):
+            return
+
+        screenshot_dir = 'screenshots'
+        if not os.path.exists(screenshot_dir):
+            os.makedirs(screenshot_dir)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = os.path.join(screenshot_dir, f"screenshot_{timestamp}.jpg")
+        cv2.imwrite(filepath, self.current_frame)
+        self.statusBar().showMessage(f'截图已保存: {filepath}')
+        logger.info("截图已保存: %s", filepath)
+
+    # ══════════════════════════════════════════════
+    #  窗口事件
+    # ══════════════════════════════════════════════
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """窗口关闭时确保线程安全退出。"""
         if self.detection_thread and self.detection_active:
             self.detection_thread.stop()
         event.accept()

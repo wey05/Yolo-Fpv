@@ -1,35 +1,39 @@
+"""
+YOLO 实时目标检测系统 - 程序入口
+==================================
+"""
+
+import logging
 import sys
+
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
+
 from ui.main_window import MainWindow
+from ui.theme import GLOBAL_STYLESHEET
 
 
-def main():
+def _setup_logging() -> None:
+    """配置全局日志格式。"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
+def main() -> None:
+    _setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("YOLO 实时目标检测系统启动中...")
+
     app = QApplication(sys.argv)
-    
     app.setStyle('Fusion')
-    
-    app.setStyleSheet("""
-        QMainWindow {
-            background-color: #f0f0f0;
-        }
-        QGroupBox {
-            font-weight: bold;
-            border: 2px solid #999;
-            border-radius: 5px;
-            margin-top: 10px;
-            padding-top: 10px;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 5px;
-        }
-    """)
-    
+    app.setStyleSheet(GLOBAL_STYLESHEET)
+
     window = MainWindow()
     window.show()
-    
+
+    logger.info("窗口已显示，进入事件循环")
     sys.exit(app.exec_())
 
 
