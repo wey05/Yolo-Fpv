@@ -96,6 +96,9 @@ class MainWindow(QMainWindow):
         self.screenshot_flash_label = None
         self.screenshot_flash_animation = None
         
+        self.is_fullscreen_mode = False
+        self.right_panel = None
+        
         self._init_ui()
         self._load_config_to_ui()
 
@@ -232,7 +235,8 @@ class MainWindow(QMainWindow):
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setMinimumWidth(320)
         scroll_area.setMaximumWidth(400)
-
+        
+        self.right_panel = scroll_area
         root.addWidget(scroll_area, stretch=1)
 
         self.statusBar().showMessage('就绪 - 点击「开始检测」启动')
@@ -629,6 +633,23 @@ class MainWindow(QMainWindow):
         self.screenshot_flash_animation.setEasingCurve(QEasingCurve.OutCubic)
         self.screenshot_flash_animation.finished.connect(lambda: self.screenshot_flash_label.setVisible(False))
         self.screenshot_flash_animation.start()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        """处理键盘事件。"""
+        if event.key() == Qt.Key_N:
+            self._toggle_display_mode()
+        super().keyPressEvent(event)
+
+    def _toggle_display_mode(self) -> None:
+        """切换显示模式（正常模式/全屏视频模式）。"""
+        self.is_fullscreen_mode = not self.is_fullscreen_mode
+        
+        if self.is_fullscreen_mode:
+            self.right_panel.setVisible(False)
+            self.statusBar().showMessage('全屏视频模式 - 按N键返回正常模式')
+        else:
+            self.right_panel.setVisible(True)
+            self.statusBar().showMessage('正常模式 - 按N键切换到全屏视频模式')
 
     # ══════════════════════════════════════════════
     #  窗口事件
