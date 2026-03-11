@@ -73,6 +73,10 @@ class MainWindow(QMainWindow):
         self.loading_timer = QTimer()
         self.loading_timer.timeout.connect(self._update_loading_animation)
         
+        self.screenshot_flash_alpha = 255
+        self.screenshot_flash_timer = QTimer()
+        self.screenshot_flash_timer.timeout.connect(self._update_screenshot_flash)
+        
         self._init_ui()
         self._load_config_to_ui()
 
@@ -587,8 +591,40 @@ class MainWindow(QMainWindow):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filepath = os.path.join(screenshot_dir, f"screenshot_{timestamp}.jpg")
         cv2.imwrite(filepath, self.current_frame)
+        
         self.statusBar().showMessage(f'截图已保存: {filepath}')
         logger.info("截图已保存: %s", filepath)
+        
+        self.screenshot_flash_alpha = 255
+        self.screenshot_flash_timer.start(30)
+
+    def _update_screenshot_flash(self) -> None:
+        """更新截图闪光动画。"""
+        self.screenshot_flash_alpha -= 15
+        if self.screenshot_flash_alpha <= 0:
+            self.screenshot_flash_timer.stop()
+            self.screenshot_flash_alpha = 0
+        
+        if self.current_frame is not None:
+            rgb = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb.shape
+            qt_img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+            
+            pixmap = QPixmap.fromImage(qt_img)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            flash_color = QColor(255, 255, 255, self.screenshot_flash_alpha)
+            painter.fillRect(0, 0, w, h, flash_color)
+            
+            painter.end()
+            
+            scaled = pixmap.scaled(
+                self.video_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self.video_label.setPixmap(scaled)
 
     # ══════════════════════════════════════════════
     #  窗口事件
