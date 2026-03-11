@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSlider,
     QVBoxLayout,
     QWidget,
@@ -91,7 +92,7 @@ class MainWindow(QMainWindow):
     def _init_ui(self) -> None:
         self.setWindowTitle('YOLO 实时目标检测系统')
         self.setGeometry(100, 100, 1280, 760)
-        self.setMinimumSize(900, 640)
+        self.setMinimumSize(1100, 700)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -102,17 +103,24 @@ class MainWindow(QMainWindow):
         # ── 左侧：视频区域 ───────────────────────
         root.addWidget(self._build_video_panel(), stretch=3)
 
-        # ── 右侧：控制面板 ───────────────────────
-        right = QVBoxLayout()
-        right.setSpacing(10)
-        right.addWidget(self._build_stats_card())
-        right.addWidget(self._build_settings_card())
-        right.addWidget(self._build_control_card())
-        right.addStretch()
+        # ── 右侧：控制面板（使用滚动区域）──────────
+        right_content = QWidget()
+        right_layout = QVBoxLayout(right_content)
+        right_layout.setSpacing(10)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(self._build_stats_card())
+        right_layout.addWidget(self._build_settings_card())
+        right_layout.addWidget(self._build_control_card())
+        right_layout.addStretch()
 
-        right_container = QWidget()
-        right_container.setLayout(right)
-        root.addWidget(right_container, stretch=1)
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(right_content)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setMinimumWidth(320)
+        scroll_area.setMaximumWidth(400)
+
+        root.addWidget(scroll_area, stretch=1)
 
         self.statusBar().showMessage('就绪 - 点击「开始检测」启动')
 
@@ -137,37 +145,33 @@ class MainWindow(QMainWindow):
     def _build_stats_card(self) -> QGroupBox:
         group = QGroupBox("检测统计")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 20, 12, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 15, 10, 10)
+        layout.setSpacing(4)
 
-        # 标题
         title = QLabel("检测到的人物数量")
         title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont('Microsoft YaHei', 11, QFont.Bold))
+        title.setFont(QFont('Microsoft YaHei', 10, QFont.Bold))
         layout.addWidget(title)
 
-        # 人数大数字
         self.person_count_label = QLabel("0")
         self.person_count_label.setAlignment(Qt.AlignCenter)
-        self.person_count_label.setFont(QFont('Consolas', 52, QFont.Bold))
+        self.person_count_label.setFont(QFont('Consolas', 48, QFont.Bold))
         self.person_count_label.setStyleSheet(
             person_count_style(Colors.STATUS_SAFE)
         )
-        self.person_count_label.setMinimumHeight(100)
+        self.person_count_label.setMinimumHeight(80)
         layout.addWidget(self.person_count_label)
 
-        # FPS
         self.fps_label = QLabel("FPS: 0.0")
         self.fps_label.setAlignment(Qt.AlignCenter)
         self.fps_label.setStyleSheet(INFO_LABEL_STYLE)
-        self.fps_label.setFont(QFont('Consolas', 11))
+        self.fps_label.setFont(QFont('Consolas', 10))
         layout.addWidget(self.fps_label)
 
-        # 当前模型
         self.model_info_label = QLabel("模型: --")
         self.model_info_label.setAlignment(Qt.AlignCenter)
         self.model_info_label.setStyleSheet(INFO_LABEL_STYLE)
-        self.model_info_label.setFont(QFont('Microsoft YaHei', 10))
+        self.model_info_label.setFont(QFont('Microsoft YaHei', 9))
         layout.addWidget(self.model_info_label)
 
         return group
@@ -177,10 +181,9 @@ class MainWindow(QMainWindow):
     def _build_settings_card(self) -> QGroupBox:
         group = QGroupBox("检测设置")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 20, 12, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 15, 10, 10)
+        layout.setSpacing(4)
 
-        # ─ 模型选择 ─
         layout.addWidget(self._make_section_title("模型选择"))
 
         self.model_combo = QComboBox()
@@ -190,10 +193,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.model_combo)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        btn_row.setSpacing(6)
 
         self.switch_model_btn = QPushButton("切换模型")
-        self.switch_model_btn.setMinimumHeight(36)
+        self.switch_model_btn.setMinimumHeight(32)
         self.switch_model_btn.setStyleSheet(BTN_SWITCH)
         self.switch_model_btn.setEnabled(False)
         self.switch_model_btn.clicked.connect(self._on_switch_model)
@@ -201,7 +204,7 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self.switch_model_btn)
 
         self.refresh_btn = QPushButton("刷新")
-        self.refresh_btn.setMinimumHeight(36)
+        self.refresh_btn.setMinimumHeight(32)
         self.refresh_btn.setStyleSheet(BTN_REFRESH)
         self.refresh_btn.clicked.connect(self._on_refresh_models)
         self.refresh_btn.setToolTip("重新扫描 models/ 目录")
@@ -209,11 +212,10 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(btn_row)
 
-        # ─ 置信度阈值 ─
         layout.addWidget(self._make_section_title("置信度阈值"))
 
         conf_row = QHBoxLayout()
-        conf_row.setSpacing(8)
+        conf_row.setSpacing(6)
 
         self.conf_slider = QSlider(Qt.Horizontal)
         self.conf_slider.setRange(5, 95)
@@ -226,24 +228,23 @@ class MainWindow(QMainWindow):
         self.conf_value_label = QLabel("0.50")
         self.conf_value_label.setStyleSheet(SLIDER_VALUE_STYLE)
         self.conf_value_label.setAlignment(Qt.AlignCenter)
-        self.conf_value_label.setFont(QFont('Consolas', 12, QFont.Bold))
+        self.conf_value_label.setFont(QFont('Consolas', 11, QFont.Bold))
         conf_row.addWidget(self.conf_value_label)
 
         layout.addLayout(conf_row)
 
-        # ─ 摄像头选择 ─
         layout.addWidget(self._make_section_title("摄像头"))
 
         cam_row = QHBoxLayout()
-        cam_row.setSpacing(8)
+        cam_row.setSpacing(6)
 
         self.camera_combo = QComboBox()
         self._populate_cameras()
         cam_row.addWidget(self.camera_combo, stretch=1)
 
         self.cam_refresh_btn = QPushButton("扫描")
-        self.cam_refresh_btn.setMinimumHeight(30)
-        self.cam_refresh_btn.setMaximumWidth(60)
+        self.cam_refresh_btn.setMinimumHeight(28)
+        self.cam_refresh_btn.setMaximumWidth(55)
         self.cam_refresh_btn.setStyleSheet(BTN_REFRESH)
         self.cam_refresh_btn.clicked.connect(self._on_refresh_cameras)
         self.cam_refresh_btn.setToolTip("重新扫描可用摄像头")
@@ -251,7 +252,6 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(cam_row)
 
-        # ─ 分辨率选择 ─
         layout.addWidget(self._make_section_title("分辨率"))
 
         self.resolution_combo = QComboBox()
@@ -268,18 +268,18 @@ class MainWindow(QMainWindow):
     def _build_control_card(self) -> QGroupBox:
         group = QGroupBox("控制面板")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 20, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 15, 10, 10)
+        layout.setSpacing(6)
 
         self.start_btn = QPushButton("开始检测")
-        self.start_btn.setMinimumHeight(42)
+        self.start_btn.setMinimumHeight(38)
         self.start_btn.setStyleSheet(BTN_START)
         self.start_btn.clicked.connect(self._on_start)
         self.start_btn.setToolTip("启动摄像头并开始实时检测")
         layout.addWidget(self.start_btn)
 
         self.stop_btn = QPushButton("停止检测")
-        self.stop_btn.setMinimumHeight(42)
+        self.stop_btn.setMinimumHeight(38)
         self.stop_btn.setStyleSheet(BTN_STOP)
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._on_stop)
@@ -287,7 +287,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stop_btn)
 
         self.screenshot_btn = QPushButton("保存截图")
-        self.screenshot_btn.setMinimumHeight(42)
+        self.screenshot_btn.setMinimumHeight(38)
         self.screenshot_btn.setStyleSheet(BTN_SCREENSHOT)
         self.screenshot_btn.setEnabled(False)
         self.screenshot_btn.clicked.connect(self._on_screenshot)
@@ -295,7 +295,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.screenshot_btn)
 
         self.exit_btn = QPushButton("退出程序")
-        self.exit_btn.setMinimumHeight(42)
+        self.exit_btn.setMinimumHeight(38)
         self.exit_btn.setStyleSheet(BTN_EXIT)
         self.exit_btn.clicked.connect(self.close)
         layout.addWidget(self.exit_btn)

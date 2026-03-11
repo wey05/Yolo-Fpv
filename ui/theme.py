@@ -200,6 +200,16 @@ GLOBAL_STYLESHEET = f"""
         padding: 4px 8px;
     }}
 
+    /* ─ 滚动区域 ─ */
+    QScrollArea {{
+        background-color: {Colors.BG_PRIMARY};
+        border: none;
+        border-radius: 10px;
+    }}
+    QScrollArea > QWidget > QWidget {{
+        background-color: transparent;
+    }}
+
     /* ─ 滚动条 ─ */
     QScrollBar:vertical {{
         background: {Colors.BG_SECONDARY};
