@@ -11,7 +11,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtProperty, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QFont, QImage, QPixmap, QPainter, QColor
 from PyQt5.QtWidgets import (
     QApplication,
@@ -51,6 +51,26 @@ logger = logging.getLogger(__name__)
 MODEL_EXTENSIONS = ('.pt', '.pth', '.onnx', '.engine')
 
 
+class FlashLabel(QLabel):
+    """截图闪光标签，使用属性动画实现平滑效果。"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._flash_opacity = 0.0
+    
+    @pyqtProperty(float)
+    def flashOpacity(self) -> float:
+        return self._flash_opacity
+    
+    @flashOpacity.setter
+    def flashOpacity(self, value: float) -> None:
+        self._flash_opacity = value
+        self.setStyleSheet(f"""
+            background-color: rgba(255, 255, 255, {int(value * 255)});
+            border: none;
+        """)
+
+
 class MainWindow(QMainWindow):
     """YOLO 实时目标检测系统主窗口。"""
 
@@ -73,9 +93,8 @@ class MainWindow(QMainWindow):
         self.loading_timer = QTimer()
         self.loading_timer.timeout.connect(self._update_loading_animation)
         
-        self.screenshot_flash_alpha = 255
-        self.screenshot_flash_timer = QTimer()
-        self.screenshot_flash_timer.timeout.connect(self._update_screenshot_flash)
+        self.screenshot_flash_label = None
+        self.screenshot_flash_animation = None
         
         self._init_ui()
         self._load_config_to_ui()
@@ -231,6 +250,12 @@ class MainWindow(QMainWindow):
         self.video_label.setStyleSheet(VIDEO_LABEL_STYLE)
         self.video_label.setFont(QFont('Microsoft YaHei', 14))
         layout.addWidget(self.video_label)
+
+        self.screenshot_flash_label = FlashLabel(self)
+        self.screenshot_flash_label.setMinimumSize(640, 480)
+        self.screenshot_flash_label.setAlignment(Qt.AlignCenter)
+        self.screenshot_flash_label.setVisible(False)
+        layout.addWidget(self.screenshot_flash_label)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -595,36 +620,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f'截图已保存: {filepath}')
         logger.info("截图已保存: %s", filepath)
         
-        self.screenshot_flash_alpha = 255
-        self.screenshot_flash_timer.start(30)
-
-    def _update_screenshot_flash(self) -> None:
-        """更新截图闪光动画。"""
-        self.screenshot_flash_alpha -= 15
-        if self.screenshot_flash_alpha <= 0:
-            self.screenshot_flash_timer.stop()
-            self.screenshot_flash_alpha = 0
+        self.screenshot_flash_label.setVisible(True)
         
-        if self.current_frame is not None:
-            rgb = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb.shape
-            qt_img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
-            
-            pixmap = QPixmap.fromImage(qt_img)
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            
-            flash_color = QColor(255, 255, 255, self.screenshot_flash_alpha)
-            painter.fillRect(0, 0, w, h, flash_color)
-            
-            painter.end()
-            
-            scaled = pixmap.scaled(
-                self.video_label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-            self.video_label.setPixmap(scaled)
+        self.screenshot_flash_animation = QPropertyAnimation(self.screenshot_flash_label, b"flashOpacity")
+        self.screenshot_flash_animation.setDuration(200)
+        self.screenshot_flash_animation.setStartValue(1.0)
+        self.screenshot_flash_animation.setEndValue(0.0)
+        self.screenshot_flash_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self.screenshot_flash_animation.finished.connect(lambda: self.screenshot_flash_label.setVisible(False))
+        self.screenshot_flash_animation.start()
 
     # ══════════════════════════════════════════════
     #  窗口事件
