@@ -30,7 +30,7 @@ class CameraManager:
     def open(self) -> bool:
         """打开摄像头并设置参数。"""
         try:
-            self.cap = cv2.VideoCapture(self.camera_id)
+            self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
 
             if not self.cap.isOpened():
                 logger.warning("无法打开摄像头 %d", self.camera_id)
@@ -40,7 +40,6 @@ class CameraManager:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
             self.cap.set(cv2.CAP_PROP_FPS, self.fps)
 
-            # 读回实际生效的参数
             self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             self.fps = int(self.cap.get(cv2.CAP_PROP_FPS))
@@ -92,7 +91,7 @@ class CameraManager:
         """枚举系统中可用的摄像头设备 ID。"""
         available: list[int] = []
         for i in range(max_test):
-            cap = cv2.VideoCapture(i)
+            cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
             if cap.isOpened():
                 available.append(i)
                 cap.release()

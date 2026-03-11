@@ -160,6 +160,15 @@ DETECT_ALL_CLASSES = False  # 改为False仅检测人员
 - 使用 `logging` 模块替代 `print` 输出日志
 - 检测线程使用 `threading.Lock` 保证线程安全
 
+## 更新日志
+
+### 2026-03-11 - 摄像头兼容性修复
+- **修复Windows系统摄像头1无法打开的问题**
+  - 在`CameraManager`中使用`cv2.CAP_DSHOW`后端替代默认后端
+  - 提高了多摄像头场景下的兼容性和稳定性
+  - 修改文件：`core/camera.py`
+  - 测试结果：摄像头0和摄像头1均可正常打开和读取
+
 ## 许可证
 
 MIT License
