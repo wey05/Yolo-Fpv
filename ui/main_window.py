@@ -11,8 +11,8 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QImage, QPixmap
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont, QImage, QPixmap, QPainter, QColor
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
@@ -25,9 +25,11 @@ from PyQt5.QtWidgets import (
     QSlider,
     QVBoxLayout,
     QWidget,
+    QProgressBar,
 )
 
 from core.camera import RESOLUTION_PRESETS, CameraManager
+from core.config import ConfigManager
 from ui.theme import (
     BTN_EXIT,
     BTN_REFRESH,
@@ -63,7 +65,16 @@ class MainWindow(QMainWindow):
         self.current_model: Optional[str] = (
             self.available_models[0] if self.available_models else None
         )
+        
+        self.config_manager = ConfigManager()
+        self.config_manager.load()
+        
+        self.loading_angle = 0
+        self.loading_timer = QTimer()
+        self.loading_timer.timeout.connect(self._update_loading_animation)
+        
         self._init_ui()
+        self._load_config_to_ui()
 
     # ══════════════════════════════════════════════
     #  模型扫描
@@ -85,13 +96,92 @@ class MainWindow(QMainWindow):
                 logger.warning("未找到任何模型文件")
         return sorted(models)
 
+    def _load_config_to_ui(self) -> None:
+        """从配置加载到UI控件。"""
+        last_model = self.config_manager.get('last_model', '')
+        if last_model and last_model in self.available_models:
+            self.model_combo.setCurrentText(last_model)
+            self.current_model = last_model
+        
+        camera_id = self.config_manager.get('camera_id', 0)
+        self.camera_combo.setCurrentIndex(camera_id)
+        
+        resolution = self.config_manager.get('resolution', '640x480')
+        self.resolution_combo.setCurrentText(resolution)
+        
+        conf = self.config_manager.get('confidence_threshold', 0.5)
+        self.conf_slider.setValue(int(conf * 100))
+        self.conf_value_label.setText(f"{conf:.2f}")
+
+    def _save_config_from_ui(self) -> None:
+        """从UI控件保存到配置。"""
+        self.config_manager.update(
+            last_model=self.model_combo.currentText(),
+            camera_id=self.camera_combo.currentIndex(),
+            resolution=self.resolution_combo.currentText(),
+            confidence_threshold=self.conf_slider.value() / 100.0,
+            window_x=self.x(),
+            window_y=self.y(),
+            window_width=self.width(),
+            window_height=self.height()
+        )
+        self.config_manager.save()
+
+    def _show_loading_progress(self, progress: int, message: str) -> None:
+        """显示加载进度。"""
+        self.progress_bar.setValue(progress)
+        self.progress_bar.setFormat(f"{progress}% - {message}")
+        self.progress_bar.setVisible(True)
+        self.loading_label.setText(message)
+        self.loading_label.setVisible(True)
+        
+        if progress >= 100:
+            QTimer.singleShot(1000, self._hide_loading_progress)
+
+    def _hide_loading_progress(self) -> None:
+        """隐藏加载进度。"""
+        self.progress_bar.setVisible(False)
+        self.loading_label.setVisible(False)
+
+    def _update_loading_animation(self) -> None:
+        """更新加载动画。"""
+        self.loading_angle = (self.loading_angle + 15) % 360
+        pixmap = self.video_label.pixmap()
+        if pixmap:
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            center_x = pixmap.width() // 2
+            center_y = pixmap.height() // 2
+            radius = 50
+            
+            for i in range(4):
+                angle = self.loading_angle + i * 90
+                rad = angle * 3.14159265359 / 180
+                x = center_x + int(radius * 0.8 * rad)
+                y = center_y + int(radius * 0.8 * rad)
+                
+                alpha = int(255 * (1 - i / 4))
+                color = QColor(124, 58, 237, alpha)
+                painter.setBrush(color)
+                painter.setPen(Qt.NoPen)
+                painter.drawEllipse(x - 8, y - 8, 16, 16)
+            
+            painter.end()
+            self.video_label.setPixmap(pixmap)
+
     # ══════════════════════════════════════════════
     #  UI 初始化
     # ══════════════════════════════════════════════
 
     def _init_ui(self) -> None:
         self.setWindowTitle('YOLO 实时目标检测系统')
-        self.setGeometry(100, 100, 1280, 760)
+        self.setGeometry(
+            self.config_manager.get('window_x', 100),
+            self.config_manager.get('window_y', 100),
+            self.config_manager.get('window_width', 1280),
+            self.config_manager.get('window_height', 760)
+        )
         self.setMinimumSize(1100, 700)
 
         central = QWidget()
@@ -137,6 +227,19 @@ class MainWindow(QMainWindow):
         self.video_label.setStyleSheet(VIDEO_LABEL_STYLE)
         self.video_label.setFont(QFont('Microsoft YaHei', 14))
         layout.addWidget(self.video_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setMaximumHeight(20)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p% - %v")
+        layout.addWidget(self.progress_bar)
+
+        self.loading_label = QLabel()
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.setVisible(False)
+        self.loading_label.setStyleSheet("color: #e8e9f0; font-size: 14px;")
+        layout.addWidget(self.loading_label)
 
         return group
 
@@ -355,6 +458,8 @@ class MainWindow(QMainWindow):
         self.detection_thread.frame_ready.connect(self._on_frame_ready)
         self.detection_thread.error_occurred.connect(self._on_error)
         self.detection_thread.model_switched.connect(self._on_model_switched)
+        self.detection_thread.camera_opening_progress.connect(self._show_loading_progress)
+        self.detection_thread.model_loading_progress.connect(self._show_loading_progress)
 
         self.detection_active = True
         self.detection_thread.start()
@@ -385,6 +490,8 @@ class MainWindow(QMainWindow):
         self.fps_label.setText("FPS: 0.0")
         self.statusBar().showMessage('已停止')
         logger.info("检测已停止")
+        
+        self._save_config_from_ui()
 
     def _on_frame_ready(self, frame: np.ndarray, person_count: int, fps: float) -> None:
         """接收新帧并更新 UI。"""
@@ -491,4 +598,6 @@ class MainWindow(QMainWindow):
         """窗口关闭时确保线程安全退出。"""
         if self.detection_thread and self.detection_active:
             self.detection_thread.stop()
+        
+        self._save_config_from_ui()
         event.accept()

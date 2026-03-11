@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import threading
 from typing import Optional
@@ -17,6 +18,8 @@ class DetectionThread(QThread):
     frame_ready = pyqtSignal(np.ndarray, int, float)
     error_occurred = pyqtSignal(str)
     model_switched = pyqtSignal(str)
+    camera_opening_progress = pyqtSignal(int, str)  # 进度(0-100), 状态消息
+    model_loading_progress = pyqtSignal(int, str)  # 进度(0-100), 状态消息
 
     def __init__(
         self,
@@ -81,17 +84,23 @@ class DetectionThread(QThread):
 
     def run(self) -> None:
         try:
+            self.camera_opening_progress.emit(10, "正在初始化检测器...")
             self.detector = ObjectDetector(self.model_name)
+            
+            self.camera_opening_progress.emit(30, "正在打开摄像头...")
             self.camera = CameraManager(self.camera_id, self.resolution)
 
             if not self.camera.open():
                 self.error_occurred.emit("无法打开摄像头")
                 return
 
+            self.camera_opening_progress.emit(50, "摄像头已打开，正在启动检测...")
             self.running = True
             fps_counter: int = 0
             fps_timer: float = time.time()
             fps: float = 0.0
+
+            self.camera_opening_progress.emit(100, "检测已启动")
 
             while self.running:
                 # 处理挂起的模型切换请求
@@ -100,9 +109,13 @@ class DetectionThread(QThread):
                     self._pending_model = None
 
                 if pending_model and self.detector:
+                    self.model_loading_progress.emit(0, f"正在切换模型到 {os.path.basename(pending_model)}...")
                     if self.detector.switch_model(pending_model):
                         self.model_name = pending_model
+                        self.model_loading_progress.emit(100, "模型切换成功")
                         self.model_switched.emit(pending_model)
+                    else:
+                        self.model_loading_progress.emit(0, "模型切换失败")
 
                 # 处理挂起的分辨率切换请求
                 with self._lock:

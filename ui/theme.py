@@ -234,6 +234,21 @@ GLOBAL_STYLESHEET = f"""
         padding: 6px 10px;
         font-size: 12px;
     }}
+
+    /* ─ 进度条 ─ */
+    QProgressBar {{
+        background-color: {Colors.BG_TERTIARY};
+        border: 1px solid {Colors.BORDER};
+        border-radius: 4px;
+        text-align: center;
+        color: {Colors.TEXT_PRIMARY};
+        font-size: 11px;
+        font-weight: bold;
+    }}
+    QProgressBar::chunk {{
+        background-color: {Colors.ACCENT};
+        border-radius: 3px;
+    }}
 """
 
 
