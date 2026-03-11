@@ -98,6 +98,9 @@ class MainWindow(QMainWindow):
         
         self.is_fullscreen_mode = False
         self.right_panel = None
+        self.video_panel = None
+        self.video_group = None
+        self.fullscreen_container = None
         
         self._init_ui()
         self._load_config_to_ui()
@@ -217,7 +220,8 @@ class MainWindow(QMainWindow):
         root.setSpacing(12)
 
         # ── 左侧：视频区域 ───────────────────────
-        root.addWidget(self._build_video_panel(), stretch=3)
+        self.video_group = self._build_video_panel()
+        root.addWidget(self.video_group, stretch=3)
 
         # ── 右侧：控制面板（使用滚动区域）──────────
         right_content = QWidget()
@@ -646,9 +650,23 @@ class MainWindow(QMainWindow):
         
         if self.is_fullscreen_mode:
             self.right_panel.setVisible(False)
+            self.video_group.setTitle('')
+            self.video_group.layout().setContentsMargins(0, 0, 0, 0)
+            self.video_label.setMinimumSize(0, 0)
+            self.screenshot_flash_label.setMinimumSize(0, 0)
+            self.progress_bar.setVisible(False)
+            self.loading_label.setVisible(False)
+            self.statusBar().setVisible(False)
             self.statusBar().showMessage('全屏视频模式 - 按N键返回正常模式')
         else:
             self.right_panel.setVisible(True)
+            self.video_group.setTitle('实时视频')
+            self.video_group.layout().setContentsMargins(8, 16, 8, 8)
+            self.video_label.setMinimumSize(640, 480)
+            self.screenshot_flash_label.setMinimumSize(640, 480)
+            self.progress_bar.setVisible(self.progress_bar.isVisible() or self.detection_active)
+            self.loading_label.setVisible(self.loading_label.isVisible())
+            self.statusBar().setVisible(True)
             self.statusBar().showMessage('正常模式 - 按N键切换到全屏视频模式')
 
     # ══════════════════════════════════════════════
